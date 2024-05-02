@@ -22,7 +22,7 @@
 #######################################################################
 #
 # Version 4.0
-# Updated script to use Invoke-WebRequest to access a URL (e.g. healthchecks.io) rather than sending an email. Changed $HomePath to use a fixed path rather than a variable.
+# Updated script to use Invoke-WebRequest to access a URL (e.g. healthchecks.io) rather than sending an email. Changed $HomePath to use a fixed path rather than a variable as it was erroring out.
 #
 # Version 3.4 (2022/01/20)
 # Add option to fix zero sub-second timestamps by running 'touch' command before 'sync'
