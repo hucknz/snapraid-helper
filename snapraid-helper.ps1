@@ -158,7 +158,7 @@ $env:PSModulePath=$env:PSModulePath+";C:\Program Files (x86)\PowerShell Communit
 ########## END INCLUDES #################
 ##########################################
 
-$Scriptname			= $MyInvocation.MyCommand.Name
+$Scriptname		= $MyInvocation.MyCommand.Name
 #$Scriptrunning		= get-wmiobject win32_process -filter "name='powershell.exe'AND CommandLine LIKE '%$Scriptname%'"
 $Scriptrunning		= get-wmiobject win32_process -filter "name='powershell.exe'AND CommandLine LIKE '%$Scriptname%' AND NOT Handle LIKE '$PID'"
 $Snapraidrunning	= get-wmiobject win32_process -filter "name='snapraid.exe'"
@@ -176,7 +176,7 @@ $SomethingDone = 0
 $HomePath = "C:\SnapRAID\Script\" # Update if your path is different. 
 $message = ""
 $ConfigError = 0
-$pingURL = ""
+$pingURL = "https://hc-ping.com/16b9e58f-b73a-477f-9f6d-7cadae4778c4"
 
 ##############################################
 ############# END VARIABLES ##################
@@ -214,6 +214,8 @@ Function Start-Pre-Process {
 			$message = "ERROR: Pre-Process failed on $CurrentDate with exit code $LastExitCode"
 			WriteLogFile $message
 			Start-Post-Process
+			$subject = $config["SubjectPrefix"]+" "+$message
+			Send-Email $subject "error" $EmailBody
 			Stop-Transcript | out-null
 			exit 1
 		}
@@ -240,6 +242,8 @@ Function Start-Post-Process {
 				$CurrentDate = Get-Date
 				$message = "ERROR: Post-Process failed on $CurrentDate with exit code $LastExitCode"
 				WriteLogFile $message
+				$subject = $config["SubjectPrefix"]+" "+$message
+				Send-Email $subject "error" $EmailBody
 				Stop-Transcript | out-null
 				exit 1
 			}
@@ -253,7 +257,11 @@ Function Start-Post-Process {
 }
 
 # Build Email Function (used many times in script)
-Function Send-Ping {
+Function Send-Email ($fSubject,$fSuccess,$EmailBody){
+	#$fSubject -- passed subject line
+	#$fSuccess -- "success" = success email, "error" = error email, "error2" = error email script/snapraid running
+	$Body = ""
+	
 	if ($fSuccess -eq "success") {
 		$EventlogID = 4711
 	}
@@ -264,18 +272,82 @@ Function Send-Ping {
 		$EventlogID = 4712
 	}
 	
-	if ($fSuccess -eq "success") {
-		param(
-	        [string]$pingURL
-	 	)
+	if ($fSuccess -ne "error2") {
+		if ($config["IncludeExtendedInfoZip"] -eq 1 ){
+			If (Test-Path $EmailBodyTmp) {
+				Rename-Item "$EmailBodyTmp" "$EmailBodyTxt"
+			}
+		
+			if (Test-Path "$EmailBodyTxt") { 
+				$file = Get-Item "$EmailBodyTxt"
+				if ($file.length -ge $config["LogFileMaxSizeZIP"]) {
+					Compress-Archive -Path "$EmailBodyTxt" -DestinationPath "$EmailBodyZip" -Force
+				}
+				else {
+					$EmailBodyZip = $EmailBodyTxt
+				}
+			}
+		}
+	}
 	
-		try {
-	        	$response = Invoke-WebRequest -Uri $pingURL -Method Post
-	        	return $response.StatusCode
-	    	} catch {
-	        	Write-Host "Failed to invoke web request: $_"
-	        	return $null
-    	    	}	
+	if (($fSuccess -eq "success") -and ($config["EmailOnSuccess"] -eq 1) -and ($config["EmailEnable"] -eq 1)) {
+		if ($config["IncludeExtendedInfo"] -eq 1 ){
+			$Body = (Get-Content $EmailBody | Out-string)
+		}
+		if ($config["IncludeExtendedInfoZip"] -eq 1 ){
+			If (Test-Path $EmailBodyZip) {
+				If ((Get-Item $EmailBodyZip).length -le $config["MaxAttachSize"]){
+					If (Test-Path $EmailBodyZip) {
+						$att = New-Object Net.Mail.Attachment($EmailBodyZip)
+						$MailMessage.Attachments.Add($att)
+					}
+				}
+				else {
+					Add-Content $EmailBody "LOG FILE TOO LARGE TO ATTACH"
+				}
+			}
+			$Body = (Get-Content $EmailBody | Out-string)
+		}
+		$MailMessage.Subject = $fSubject
+		$Mailmessage.Body 	= $Body
+		$smtpclient.Send($MailMessage)
+		if ($config["IncludeExtendedInfoZip"] -eq 1 ){
+			If (Test-Path $EmailBodyZip) {
+				$att.Dispose()
+			}
+		}
+	}
+	if (($fSuccess -eq "error") -and ($config["EmailOnError"] -eq 1) -and ($config["EmailEnable"] -eq 1)) {
+		if ($config["IncludeExtendedInfo"] -eq 1 ){
+			$Body = (Get-Content $EmailBody | Out-string)
+		}
+		if ($config["IncludeExtendedInfoZip"] -eq 1){
+			If (Test-Path $EmailBodyZip) {
+				If ((Get-Item $EmailBodyZip).length -le $config["MaxAttachSize"]){
+					If (Test-Path $EmailBodyZip) {
+						$att = New-Object Net.Mail.Attachment($EmailBodyZip)
+						$MailMessage.Attachments.Add($att)
+					}
+				}
+				else {
+					Add-Content $EmailBody "LOG FILE TOO LARGE TO ATTACH"
+				}
+			}
+			$Body = (Get-Content $EmailBody | Out-string)
+		}
+		$MailMessage.Subject = $fSubject
+		$Mailmessage.Body 	= $Body
+		$smtpclient.Send($MailMessage)
+		if ($config["IncludeExtendedInfoZip"] -eq 1 ){
+			If (Test-Path $EmailBodyZip) {
+				$att.Dispose()
+			}
+		}
+	}
+	if (($fSuccess -eq "error2") -and ($config["EmailOnError"] -eq 1) -and ($config["EmailEnable"] -eq 1)) {
+		$MailMessage.Subject = $fSubject
+		$Mailmessage.Body 	= $fSubject
+		$smtpclient.Send($MailMessage)
 	}
 	
 	if (!(Get-Eventlog -Source SnapRaid-Helper -LogName Application -ErrorAction SilentlyContinue)){
@@ -289,7 +361,10 @@ Function Check-Content-Files {
 		if (!(Test-Path $element)){
 			$message = "ERROR: Content file ($element) not found!"
 			Write-Host $message -ForegroundColor red -backgroundcolor yellow
+			Add-Content $EmailBody $message
 			Start-Post-Process
+			$subject = $config["SubjectPrefix"]+" "+$message
+			Send-Email $subject "error" $EmailBody
 			Stop-Transcript | out-null
 			exit 1
 		}
@@ -301,7 +376,10 @@ Function Check-Parity-Files {
 		if (!(Test-Path $element)){
 			$message = "ERROR: Parity file ($element) not found!"
 			Write-Host $message -ForegroundColor red -backgroundcolor yellow
+			Add-Content $EmailBody $message
 			Start-Post-Process
+			$subject = $config["SubjectPrefix"]+" "+$message
+			Send-Email $subject "error" $EmailBody
 			Stop-Transcript | out-null
 			exit 1
 		}
@@ -312,12 +390,23 @@ Function WriteLogFile ($ftext){
 	Write-Host "----------------------------------------"
 	Write-Host $ftext
 	Write-Host "----------------------------------------"
+	Add-Content $EmailBody "----------------------------------------"
+	Add-Content $EmailBody $ftext
+	Add-Content $EmailBody "----------------------------------------"
 }
 
 Function WriteExtendedLogFile ($ftext){
 	Write-Host "----------------------------------------"
 	Write-Host $ftext
 	Write-Host "----------------------------------------"
+	Add-Content $EmailBody "----------------------------------------"
+	Add-Content $EmailBody $ftext
+	Add-Content $EmailBody "----------------------------------------"
+	if ($config["IncludeExtendedInfoZip"] -eq 1 ){
+			Add-Content $EmailBodyTmp "----------------------------------------"
+			Add-Content $EmailBodyTmp $ftext
+			Add-Content $EmailBodyTmp "----------------------------------------"
+	}
 }
 
 Function ServiceManagement ($startstop){
@@ -373,6 +462,12 @@ Function RunSnapraid ($sargument){
 	else {
 		$sargument = "scrub"
 		& "$exe" -c $configfile $sargument -p 100 -o 0 -l $SnapRAIDLogfile 2>&1 3>&1 4>&1 | %{ "$_" } | tee-object -file $TmpOutput 
+	}
+	if ($config["IncludeExtendedInfoZip"] -eq 1 ){
+		$FileToAdd = $EmailBodyTmp
+	}
+	else {
+		$FileToAdd = $EmailBody
 	}
 	if (($config["ShortenLogFile"] -eq 1 ) -and ($sargument -ne "status" )){
 		$TmpOutputInRAM = Get-Content $TmpOutput -ReadCount 0
@@ -432,11 +527,19 @@ Function RunSnapraid ($sargument){
 			$message2 = "Including detailed SnapRAID Log"
 			WriteExtendedLogFile $message2
 			$SnapRAIDLogfileInRAM = (Get-Content $SnapRAIDLogfile | Out-string)
+			if ($config["IncludeExtendedInfoZip"] -eq 1 ){
+				$FileToAdd = $EmailBodyTmp
+			}
+			else {
+				$FileToAdd = $EmailBody
+			}
 			foreach ($line in $SnapRAIDLogfileInRAM){
 				Add-Content $FileToAdd $line
 				Write-Host $line
 			}
 			Start-Post-Process
+			$subject = $config["SubjectPrefix"]+" "+$message
+			Send-Email $subject "error" $EmailBody
 			Stop-Transcript | out-null
 			exit 1
 		}
@@ -473,7 +576,10 @@ Function DiffAnalyze {
 				# YES, lets inform user and not proceed with the job just in case
 				$message = "WARNING: Number of deleted files ($DEL_COUNT) exceeded threshold (" + $config["SnapRAIDDelThreshold"] + "). NOT proceeding with job. Please run manually if this is not an error condition."
 				Write-Host $message
+				Add-Content $EmailBody $message
 				Start-Post-Process
+				$subject = $config["SubjectPrefix"]+" "+$message
+				Send-Email $subject "error" $EmailBody
 				Stop-Transcript | out-null
 				exit 1
 			}
@@ -481,9 +587,11 @@ Function DiffAnalyze {
 				# NO, delete threshold not reached, lets run the job
 				$message = "Deleted files ($DEL_COUNT) did not exceed threshold (" + $config["SnapRAIDDelThreshold"] + "), proceeding with job."
 				Write-Host $message
+				Add-Content $EmailBody $message
 				$CurrentDate = Get-Date
 				$message = "$CurrentDate Changes detected [A-$ADD_COUNT,D-$DEL_COUNT,M-$MOVE_COUNT,U-$UPDATE_COUNT] and deleted files ($DEL_COUNT) is below threshold (" + $config["SnapRAIDDelThreshold"] + "). Running Command."
 				Write-Host $message
+				Add-Content $EmailBody $message
 				$global:Diffchanges = 1
 			}
 		}
@@ -659,6 +767,32 @@ if ( !(Test-Path $config["TmpOutputPath"] -pathType container) ) {
 ###### Configuration Verification End ########
 ##############################################
 
+#Initalize Email
+if ($config["EmailEnable"] -eq 1) {
+	$SMTPClient = New-Object Net.Mail.SmtpClient
+	$MailMessage= New-Object Net.Mail.Mailmessage
+	$MailMessage.IsBodyHtml = $false
+	$SMTPClient.Host = $config["SMTPHost"]
+	$SMTPClient.Port = $config["SMTPPort"]
+	$MailMessage.From = New-Object System.Net.Mail.MailAddress($config["EmailFrom"], $config["EmailFromName"])
+	$MailMessage.To.add($config["EmailTo"])
+	if ($config["SMTPSSLEnable"] -eq 1) {
+		$SMTPClient.EnableSsl = $true
+	}
+	else {
+		$SMTPClient.EnableSsl = $false
+	}
+	if ($config["SMTPAuthEnable"] -eq 1) {
+		$SMTPClient.Credentials = New-Object System.Net.NetworkCredential($config["SMTPUID"],$config["SMTPPass"]); 
+	}
+}
+$TmpOutput=$config["TmpOutputPath"] + $config["TmpOutputfile"]
+$EmailBody=$config["EmailBodyPath"] + $config["EmailBodyfile"]
+$EmailBodyTmp=$config["EmailBodyPath"] + $config["EmailBodyFileZip"] + ".out"
+$EmailBodyTxt=$config["EmailBodyPath"] + $config["EmailBodyFileZip"] + ".txt"
+$EmailBodyZip=$config["EmailBodyPath"] + $config["EmailBodyFileZip"] + ".zip"
+$SnapRAIDLogfile=$config["TmpOutputPath"] + "snapRAIDerror.out"
+
 #Ensure only one Snapraid process and only one instance of this script is running
 #Note that the detection for running script only works if it is called with the script as a parameter
 #for example powershell.exe snapraid-helper.ps1 - but not if the script is called like .\snapraid-helper.ps1
@@ -668,6 +802,8 @@ If ($Scriptrunning -match "Handle"){
 	Write-Host "----------------------------------------"
 	Write-Host $message
 	Write-Host "----------------------------------------"
+	$subject = $config["SubjectPrefix"]+" "+$message
+	Send-Email $subject "error2"
 	exit 1
 }
 If ($Snapraidrunning -match "Handle"){
@@ -676,6 +812,8 @@ If ($Snapraidrunning -match "Handle"){
 	Write-Host "----------------------------------------"
 	Write-Host $message
 	Write-Host "----------------------------------------"
+	$subject = $config["SubjectPrefix"]+" "+$message
+	Send-Email $subject "error2"
 	exit 1
 }
 
@@ -703,6 +841,10 @@ if ($config["EnableDebugOutput"] -eq 1) {
 	foreach ($element in $Config){
 		Write-Output $element
 		Write-Output "TmpOutput = $TmpOutput"
+		Write-Output "EmailBody = $EmailBody"
+		Write-Output "EmailBodyTmp = $EmailBodyTmp"
+		Write-Output "EmailBodyTxt = $EmailBodyTxt"
+		Write-Output "EmailBodyZip = $EmailBodyZip"
 		Write-Output "SnapRAIDLogfile = $SnapRAIDLogfile"
 	}
 }
@@ -755,11 +897,15 @@ foreach ($event in $EventLogOutput) {
 	$EventMessage = $event.Message
 	
 	Write-Host "$TimeGenerated,$EntryType,$Source,$EventMessage"  
+	Add-Content $EmailBody "$TimeGenerated,$EntryType,$Source,$EventMessage"  
 }
 
 if (($EventLogCount -ge 1) -and ($config["EventLogHaltOnDiskError"] -eq 1)) {
 	$message = "WARN: Found disk Errors/Warnings in EventLogs.  Aborting sync based on HaltOnDiskError"
 	Write-Host $message -ForegroundColor red -backgroundcolor yellow
+	Add-Content $EmailBody $message
+	$subject = $config["SubjectPrefix"]+" "+$message
+	Send-Email $subject "error" $EmailBody
 	Stop-Transcript | out-null
 	exit 1
 }
@@ -811,7 +957,9 @@ If ($Argument1 -eq "syncandcheck" -and $SomethingDone -ne 1) {
 	$message = "SUCCESS: SnapRAID SYNC and CHECK Job finished on $CurrentDate"
 	WriteExtendedLogFile $message
 	Start-Post-Process
-	Send-Ping
+	$subject = $config["SubjectPrefix"]+" "+$message
+	Send-Email $subject "success" $EmailBody
+ 	Send-Ping
 	$SomethingDone = 1
 }
 ElseIf ($Argument1 -eq "syncandscrub" -and $SomethingDone -ne 1) {
@@ -849,7 +997,9 @@ ElseIf ($Argument1 -eq "syncandscrub" -and $SomethingDone -ne 1) {
 	$message = "SUCCESS: SnapRAID SYNC and SCRUB Job finished on $CurrentDate"
 	WriteExtendedLogFile $message
 	Start-Post-Process
-	Send-Ping
+	$subject = $config["SubjectPrefix"]+" "+$message
+	Send-Email $subject "success" $EmailBody
+ 	Send-Ping
 	$SomethingDone = 1
 }
 ElseIf ($Argument1 -eq "syncandfix" -and $SomethingDone -ne 1) {
@@ -883,7 +1033,9 @@ ElseIf ($Argument1 -eq "syncandfix" -and $SomethingDone -ne 1) {
 	$message = "SUCCESS: SnapRAID SYNC and FIX Job finished on $CurrentDate"
 	WriteExtendedLogFile $message
 	Start-Post-Process
-	Send-Ping
+	$subject = $config["SubjectPrefix"]+" "+$message
+	Send-Email $subject "success" $EmailBody
+ 	Send-Ping
 	$SomethingDone = 1
 }
 ElseIf ($Argument1 -eq "syncandfullscrub" -and $SomethingDone -ne 1) {
@@ -917,6 +1069,8 @@ ElseIf ($Argument1 -eq "syncandfullscrub" -and $SomethingDone -ne 1) {
 	$message = "SUCCESS: SnapRAID SYNC and FULL SCRUB Job finished on $CurrentDate"
 	WriteExtendedLogFile $message
 	Start-Post-Process
+	$subject = $config["SubjectPrefix"]+" "+$message
+	Send-Email $subject "success" $EmailBody
  	Send-Ping
 	$SomethingDone = 1
 }
@@ -938,7 +1092,9 @@ If ($SomethingDone -ne 1){
 		$message = "SUCCESS: SnapRAID $Argument1 Job finished on $CurrentDate"
 		WriteExtendedLogFile $message
 		Start-Post-Process
-		Send-Ping
+		$subject = $config["SubjectPrefix"]+" "+$message
+		Send-Email $subject "success" $EmailBody
+  		Send-Ping
 		$SomethingDone = 1
 	}
 	else {
@@ -963,7 +1119,9 @@ If ($SomethingDone -ne 1){
 			$message = "SUCCESS: SnapRAID SYNC Job finished on $CurrentDate"
 			WriteExtendedLogFile $message
 			Start-Post-Process
-			Send-Ping
+			$subject = $config["SubjectPrefix"]+" "+$message
+			Send-Email $subject "success" $EmailBody
+   			Send-Ping
 			$SomethingDone = 1
 		}
 		else {
@@ -972,7 +1130,9 @@ If ($SomethingDone -ne 1){
 			$message = "$CurrentDate No change detected. Nothing to do"
 			WriteExtendedLogFile $message
 			Start-Post-Process
-			Send-Ping
+			$subject = $config["SubjectPrefix"]+" SUCCESS: SnapRAID SYNC - No change detected. Nothing to do"
+			Send-Email $subject "success" $EmailBody
+   			Send-Ping
 			$SomethingDone = 1
 		}
 	}
