@@ -289,7 +289,6 @@ Function Check-Content-Files {
 		if (!(Test-Path $element)){
 			$message = "ERROR: Content file ($element) not found!"
 			Write-Host $message -ForegroundColor red -backgroundcolor yellow
-			Add-Content $EmailBody $message
 			Start-Post-Process
 			Stop-Transcript | out-null
 			exit 1
@@ -302,7 +301,6 @@ Function Check-Parity-Files {
 		if (!(Test-Path $element)){
 			$message = "ERROR: Parity file ($element) not found!"
 			Write-Host $message -ForegroundColor red -backgroundcolor yellow
-			Add-Content $EmailBody $message
 			Start-Post-Process
 			Stop-Transcript | out-null
 			exit 1
@@ -475,7 +473,6 @@ Function DiffAnalyze {
 				# YES, lets inform user and not proceed with the job just in case
 				$message = "WARNING: Number of deleted files ($DEL_COUNT) exceeded threshold (" + $config["SnapRAIDDelThreshold"] + "). NOT proceeding with job. Please run manually if this is not an error condition."
 				Write-Host $message
-				Add-Content $EmailBody $message
 				Start-Post-Process
 				Stop-Transcript | out-null
 				exit 1
@@ -484,11 +481,9 @@ Function DiffAnalyze {
 				# NO, delete threshold not reached, lets run the job
 				$message = "Deleted files ($DEL_COUNT) did not exceed threshold (" + $config["SnapRAIDDelThreshold"] + "), proceeding with job."
 				Write-Host $message
-				Add-Content $EmailBody $message
 				$CurrentDate = Get-Date
 				$message = "$CurrentDate Changes detected [A-$ADD_COUNT,D-$DEL_COUNT,M-$MOVE_COUNT,U-$UPDATE_COUNT] and deleted files ($DEL_COUNT) is below threshold (" + $config["SnapRAIDDelThreshold"] + "). Running Command."
 				Write-Host $message
-				Add-Content $EmailBody $message
 				$global:Diffchanges = 1
 			}
 		}
