@@ -173,7 +173,7 @@ $global:ServicesStarted = 0
 $global:ServicesStopped = 0
 $global:Diffchanges = 99
 $SomethingDone = 0
-$HomePath = "C:\SnapRAID\helper-script\" # Update if your path is different. 
+$HomePath = "C:\SnapRAID\Script\" # Update if your path is different. 
 $message = ""
 $ConfigError = 0
 $pingURL = ""
@@ -266,7 +266,7 @@ Function Send-Ping {
 	
 	if ($fSuccess -eq "success") {
 		param(
-	        [string]$pingURL,
+	        [string]$pingURL
 	 	)
 	
 		try {
