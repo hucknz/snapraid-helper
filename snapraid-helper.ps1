@@ -22,7 +22,7 @@
 #######################################################################
 #
 # Version 4.0
-# Updated script to use Invoke-WebRequest to access a URL (e.g. healthchecks.io) rather than sending an email. Changed $HomePath to use a fixed path rather than a variable. 
+# Updated script to use Invoke-WebRequest to access a URL (e.g. healthchecks.io) rather than sending an email. Changed $HomePath to use a fixed path rather than a variable.
 #
 # Version 3.4 (2022/01/20)
 # Add option to fix zero sub-second timestamps by running 'touch' command before 'sync'
@@ -50,7 +50,7 @@
 # Fixed writing to eventlog if email is disabled
 #
 # Version 2.6 (2014/04/19)
-# Added a way to influence the percentage of a default scrub run with optional -scrubpercent option 
+# Added a way to influence the percentage of a default scrub run with optional -scrubpercent option
 #
 # Version 2.5.2 (2014/04/06)
 # Looks like a small encoding bug in the script. Should fix "A positional parameter cannot be found that accepts argument[...]" error
@@ -112,7 +112,7 @@
 # I had a problem with German Umlauts not beeing displayed correct. Enable UTF8Console in the .ini
 # You HAVE to Change the Powershell Console Font to something like Lucida Console
 # Note: Windows has a bug saving Lucida with Fontsize 12 as default. Select 10 or 14 - this works
-# 
+#
 #######################################################################
 #Enable to pass the check/scrub command to SnapRAID as a parameter for the Powershellscript
 #Has to be the first non-comment and non-blank line, otherwise param won't work.
@@ -139,7 +139,7 @@ each time:
 ##########################################
 ############# NOTES ######################
 ##########################################
-<#   
+<#
 - This script depends upon the powershell community extensions from http://pscx.codeplex.com/
 - Or direct sownload: http://pscx.codeplex.com/downloads/get/523236
 - Snapraid's output is unix formatted (CRLF vs CR) so -delim "`0" is required to have each line on newline when using Get-Content
@@ -158,7 +158,7 @@ $env:PSModulePath=$env:PSModulePath+";C:\Program Files (x86)\PowerShell Communit
 ########## END INCLUDES #################
 ##########################################
 
-$Scriptname		= $MyInvocation.MyCommand.Name
+$Scriptname				= $MyInvocation.MyCommand.Name
 #$Scriptrunning		= get-wmiobject win32_process -filter "name='powershell.exe'AND CommandLine LIKE '%$Scriptname%'"
 $Scriptrunning		= get-wmiobject win32_process -filter "name='powershell.exe'AND CommandLine LIKE '%$Scriptname%' AND NOT Handle LIKE '$PID'"
 $Snapraidrunning	= get-wmiobject win32_process -filter "name='snapraid.exe'"
@@ -173,10 +173,9 @@ $global:ServicesStarted = 0
 $global:ServicesStopped = 0
 $global:Diffchanges = 99
 $SomethingDone = 0
-$HomePath = "C:\SnapRAID\Script\" # Update if your path is different. 
+$HomePath = "C:\SnapRAID\Script\" # Update if your path is different.
 $message = ""
 $ConfigError = 0
-$pingURL = "https://hc-ping.com/16b9e58f-b73a-477f-9f6d-7cadae4778c4"
 
 ##############################################
 ############# END VARIABLES ##################
@@ -261,7 +260,7 @@ Function Send-Email ($fSubject,$fSuccess,$EmailBody){
 	#$fSubject -- passed subject line
 	#$fSuccess -- "success" = success email, "error" = error email, "error2" = error email script/snapraid running
 	$Body = ""
-	
+
 	if ($fSuccess -eq "success") {
 		$EventlogID = 4711
 	}
@@ -271,14 +270,14 @@ Function Send-Email ($fSubject,$fSuccess,$EmailBody){
 	if ($fSuccess -eq "error2") {
 		$EventlogID = 4712
 	}
-	
+
 	if ($fSuccess -ne "error2") {
 		if ($config["IncludeExtendedInfoZip"] -eq 1 ){
 			If (Test-Path $EmailBodyTmp) {
 				Rename-Item "$EmailBodyTmp" "$EmailBodyTxt"
 			}
-		
-			if (Test-Path "$EmailBodyTxt") { 
+
+			if (Test-Path "$EmailBodyTxt") {
 				$file = Get-Item "$EmailBodyTxt"
 				if ($file.length -ge $config["LogFileMaxSizeZIP"]) {
 					Compress-Archive -Path "$EmailBodyTxt" -DestinationPath "$EmailBodyZip" -Force
@@ -289,7 +288,7 @@ Function Send-Email ($fSubject,$fSuccess,$EmailBody){
 			}
 		}
 	}
-	
+
 	if (($fSuccess -eq "success") -and ($config["EmailOnSuccess"] -eq 1) -and ($config["EmailEnable"] -eq 1)) {
 		if ($config["IncludeExtendedInfo"] -eq 1 ){
 			$Body = (Get-Content $EmailBody | Out-string)
@@ -349,11 +348,34 @@ Function Send-Email ($fSubject,$fSuccess,$EmailBody){
 		$Mailmessage.Body 	= $fSubject
 		$smtpclient.Send($MailMessage)
 	}
-	
+
 	if (!(Get-Eventlog -Source SnapRaid-Helper -LogName Application -ErrorAction SilentlyContinue)){
 		New-EventLog -Source SnapRaid-Helper -LogName Application
 	}
 	write-eventlog -logname Application -source SnapRaid-Helper -eventID $EventlogID -message $fSubject
+}
+
+# Ping URL Function
+function Send-Ping {
+    param (
+        [string]$pingURL = $config["pingURL"],
+        [string]$jobstatus
+    )
+
+    # Check if $pingURL is empty
+    if ([string]::IsNullOrEmpty($pingURL)) {
+        return
+    }
+
+    # Continue with sending the ping
+    if ($jobstatus -eq "success") {
+        Invoke-WebRequest -Uri $pingURL > $null
+    }
+
+    if ($jobstatus -ne "success") {
+        $failURL = $pingURL + "/fail"
+        Invoke-WebRequest -Uri $failURL > $null
+    }
 }
 
 Function Check-Content-Files {
@@ -453,15 +475,15 @@ Function RunSnapraid ($sargument){
 	$configfile = $config["SnapRAIDPath"] + $config["SnapRAIDConfig"]
 	if ($sargument -ne "fullscrub") {
 		if (($ScrubPercent -ne 999) -and ($sargument -eq "scrub")) {
-			& "$exe" -c $configfile $sargument -p $ScrubPercent -l $SnapRAIDLogfile 2>&1 3>&1 4>&1 | %{ "$_" } | tee-object -file $TmpOutput 
+			& "$exe" -c $configfile $sargument -p $ScrubPercent -l $SnapRAIDLogfile 2>&1 3>&1 4>&1 | %{ "$_" } | tee-object -file $TmpOutput
 		}
 		else {
-			& "$exe" -c $configfile $sargument -l $SnapRAIDLogfile 2>&1 3>&1 4>&1 | %{ "$_" } | tee-object -file $TmpOutput 
+			& "$exe" -c $configfile $sargument -l $SnapRAIDLogfile 2>&1 3>&1 4>&1 | %{ "$_" } | tee-object -file $TmpOutput
 		}
 	}
 	else {
 		$sargument = "scrub"
-		& "$exe" -c $configfile $sargument -p 100 -o 0 -l $SnapRAIDLogfile 2>&1 3>&1 4>&1 | %{ "$_" } | tee-object -file $TmpOutput 
+		& "$exe" -c $configfile $sargument -p 100 -o 0 -l $SnapRAIDLogfile 2>&1 3>&1 4>&1 | %{ "$_" } | tee-object -file $TmpOutput
 	}
 	if ($config["IncludeExtendedInfoZip"] -eq 1 ){
 		$FileToAdd = $EmailBodyTmp
@@ -471,7 +493,7 @@ Function RunSnapraid ($sargument){
 	}
 	if (($config["ShortenLogFile"] -eq 1 ) -and ($sargument -ne "status" )){
 		$TmpOutputInRAM = Get-Content $TmpOutput -ReadCount 0
-		
+
 		for ($i=0; $i -lt $TmpOutputInRAM.length; $i++)
 		{
 			if ($TmpOutputInRAM[$i] -match "[0-9]*[A-Z]")
@@ -481,7 +503,7 @@ Function RunSnapraid ($sargument){
 					$TmpOutputInRAM_First_Three = $TmpOutputInRAM[$i+1].substring(0,3)
 					if ($TmpOutputInRAM_First_Three.Substring(0,1) -match "[0-9]")
 					{
-						if ($TmpOutputInRAM[$i].startswith($TmpOutputInRAM_First_Three)) 
+						if ($TmpOutputInRAM[$i].startswith($TmpOutputInRAM_First_Three))
 						{
 						}
 						else
@@ -506,11 +528,11 @@ Function RunSnapraid ($sargument){
 	}
 	else
 	{
-		#$TmpOutputInRAM = Get-Content $TmpOutput  -readcount 100 -delim "`0" 
+		#$TmpOutputInRAM = Get-Content $TmpOutput  -readcount 100 -delim "`0"
 		# NOTE the above Get-Content command is VERY VERY VERY VERY slow, so I am using the .Net function below to get the output of the Snapraid command into a variable
 		# NOTE the .Net function breaks german Umlauts so I'm using this fast way with get-content and out-string - no real time difference to .Net function
 		$TmpOutputInRAM = (Get-Content $TmpOutput | Out-string)
-		
+
 		foreach ($line in $TmpOutputInRAM){
 			Add-Content $FileToAdd $line
 			# since output is done with tee it isn't necessary to use write-host again
@@ -560,15 +582,15 @@ Function DiffAnalyze {
 		$MOVE_COUNT = Select-String $TMPOUTPUT  -Pattern "^move" | Measure-Object -Line
 		$RESIZE_COUNT = Select-String $TMPOUTPUT  -Pattern "^resize" | Measure-Object -Line
 		$UPDATE_COUNT = Select-String $TMPOUTPUT  -Pattern "^update" | Measure-Object -Line
-		
-		$DEL_COUNT = $DEL_COUNT.Lines 
-		$ADD_COUNT = $ADD_COUNT.Lines 
-		$MOVE_COUNT = $MOVE_COUNT.Lines 
+
+		$DEL_COUNT = $DEL_COUNT.Lines
+		$ADD_COUNT = $ADD_COUNT.Lines
+		$MOVE_COUNT = $MOVE_COUNT.Lines
 		$UPDATE_COUNT = $UPDATE_COUNT.Lines + $RESIZE_COUNT.Lines
-		
+
 		$message = "SUMMARY of changes - Added [$ADD_COUNT] - Deleted [$DEL_COUNT] - Moved [$MOVE_COUNT] - Updated [$UPDATE_COUNT]"
 		WriteExtendedLogFile $message
-		
+
 		# check if files have changed
 		if ( $DEL_COUNT -gt 0 -or $ADD_COUNT -gt 0 -or $MOVE_COUNT -gt 0 -or $UPDATE_COUNT -gt 0 ) {
 			# YES, check if number of deleted files exceed DEL_THRESHOLD
@@ -645,8 +667,8 @@ if ($config["UTF8Console"] -eq 1){
 }
 
 #Validate EmailBodyPath and if not specified, use ScriptPath
-if (!($config["LogPath"]) -or ($config["LogPath"] -eq "") ) { 
-	$config["LogPath"] = "$HomePath\" 
+if (!($config["LogPath"]) -or ($config["LogPath"] -eq "") ) {
+	$config["LogPath"] = "$HomePath\"
 }
 
 if ( !(Test-Path $config["LogPath"] -pathType container) ) {
@@ -671,7 +693,7 @@ if ($config["EmailEnable"] -eq 1){
 			write-host "$element is null, please add a value"
 			$ConfigError ++
 		}
-		
+
 	}
 	if ($config["IncludeExtendedInfoZip"] -eq 1){
 		$config["IncludeExtendedInfo"] = 0
@@ -679,14 +701,14 @@ if ($config["EmailEnable"] -eq 1){
 }
 
 #Service/Process Configs
-if ($config["ServiceEnable"] -eq 1){ 
+if ($config["ServiceEnable"] -eq 1){
 	if (!(Test-IsAdmin)) {
 		Write-Host "You need to run the script with elevated rights to start and stop services. Either run with Elevated Rights or change in $ConfigFile ProcessEnable=0"
 		exit 1
 	}
 	$ServiceConfigs = "ServiceName"
 	#If service handling is enabled, validate configs are not null
-	
+
 	foreach ($element in $ServiceConfigs){
 		if (!($config[$element]) -or ($config[$element] -eq "")) {
 			write-host "$element is null, please add a value"
@@ -704,11 +726,11 @@ if ($config["ServiceEnable"] -eq 1){
 	}
 }
 
-if ($config["ProcessEnable"] -eq 1){ 
+if ($config["ProcessEnable"] -eq 1){
 	#If process handling is enabled, validate configs are not null
-	
+
 	$ProcessConfigs = "ProcessPre","ProcessPost"
-	
+
 	foreach ($element in $ProcessConfigs){
 		if (!($config[$element]) -or ($config[$element] -eq "")) {
 			write-host "$element is null, please add a value"
@@ -743,8 +765,8 @@ if ($ConfigError -ge 1) {
 }
 
 #Validate EmailBodyPath and if not specified, use Windows Temp path
-if (!($config["EmailBodyPath"]) -or ($config["EmailBodyPath"] -eq "") ) { 
-	$config["EmailBodyPath"] = "$env:temp\" 
+if (!($config["EmailBodyPath"]) -or ($config["EmailBodyPath"] -eq "") ) {
+	$config["EmailBodyPath"] = "$env:temp\"
 }
 
 if ( !(Test-Path $config["EmailBodyPath"] -pathType container) ) {
@@ -754,8 +776,8 @@ if ( !(Test-Path $config["EmailBodyPath"] -pathType container) ) {
 
 
 #Validate TmpOutputPath and if not specified, use Windows Temp path
-if (!($config["TmpOutputPath"]) -or ($config["TmpOutputPath"] -eq "")){ 
-	$config["TmpOutputPath"] = "$env:temp\" 
+if (!($config["TmpOutputPath"]) -or ($config["TmpOutputPath"] -eq "")){
+	$config["TmpOutputPath"] = "$env:temp\"
 }
 
 if ( !(Test-Path $config["TmpOutputPath"] -pathType container) ) {
@@ -783,7 +805,7 @@ if ($config["EmailEnable"] -eq 1) {
 		$SMTPClient.EnableSsl = $false
 	}
 	if ($config["SMTPAuthEnable"] -eq 1) {
-		$SMTPClient.Credentials = New-Object System.Net.NetworkCredential($config["SMTPUID"],$config["SMTPPass"]); 
+		$SMTPClient.Credentials = New-Object System.Net.NetworkCredential($config["SMTPUID"],$config["SMTPPass"]);
 	}
 }
 $TmpOutput=$config["TmpOutputPath"] + $config["TmpOutputfile"]
@@ -850,7 +872,7 @@ if ($config["EnableDebugOutput"] -eq 1) {
 }
 
 #Log Management Section
-if (Test-Path "$LogFile") { 
+if (Test-Path "$LogFile") {
 	$file = Get-Item "$LogFile"
 	If ($file.length -ge $config["LogFileMaxSize"]){
 		if ($config["LogFileZipCount"] -ge 1) {
@@ -895,9 +917,9 @@ foreach ($event in $EventLogOutput) {
 	$EntryType = $event.EntryType
 	$Source = $event.Source
 	$EventMessage = $event.Message
-	
-	Write-Host "$TimeGenerated,$EntryType,$Source,$EventMessage"  
-	Add-Content $EmailBody "$TimeGenerated,$EntryType,$Source,$EventMessage"  
+
+	Write-Host "$TimeGenerated,$EntryType,$Source,$EventMessage"
+	Add-Content $EmailBody "$TimeGenerated,$EntryType,$Source,$EventMessage"
 }
 
 if (($EventLogCount -ge 1) -and ($config["EventLogHaltOnDiskError"] -eq 1)) {
@@ -916,7 +938,7 @@ $config["SnapRAIDParityFiles"] = $config["SnapRAIDParityFiles"].split(",")
 
 Check-Content-Files
 
-if (!($config["SkipParityFilesAtStart"]) -or ($config["SkipParityFilesAtStart"] -ne 1) ) { 
+if (!($config["SkipParityFilesAtStart"]) -or ($config["SkipParityFilesAtStart"] -ne 1) ) {
 	Start-Pre-Process
 	Check-Parity-Files
 }
@@ -930,7 +952,7 @@ If ($Argument1 -eq "syncandcheck" -and $SomethingDone -ne 1) {
 	$argument = "diff"
 	RunSnapraid $argument
 	If ($global:Diffchanges -eq 1){
-		if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){ 
+		if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){
 			Start-Pre-Process
 			Check-Parity-Files
 		}
@@ -943,7 +965,7 @@ If ($Argument1 -eq "syncandcheck" -and $SomethingDone -ne 1) {
 		$argument = "sync"
 		RunSnapraid $argument
 	}
-	if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){ 
+	if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){
 		Start-Pre-Process
 		Check-Parity-Files
 	}
@@ -959,14 +981,14 @@ If ($Argument1 -eq "syncandcheck" -and $SomethingDone -ne 1) {
 	Start-Post-Process
 	$subject = $config["SubjectPrefix"]+" "+$message
 	Send-Email $subject "success" $EmailBody
- 	Send-Ping
+ 	Send-Ping -jobstatus "success"
 	$SomethingDone = 1
 }
 ElseIf ($Argument1 -eq "syncandscrub" -and $SomethingDone -ne 1) {
 	$argument = "diff"
 	RunSnapraid $argument
 	If ($global:Diffchanges -eq 1){
-		if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){ 
+		if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){
 			Start-Pre-Process
 			Check-Parity-Files
 		}
@@ -979,7 +1001,7 @@ ElseIf ($Argument1 -eq "syncandscrub" -and $SomethingDone -ne 1) {
 		$argument = "sync"
 		RunSnapraid $argument
 	}
-	if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){ 
+	if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){
 		Start-Pre-Process
 		Check-Parity-Files
 	}
@@ -999,14 +1021,14 @@ ElseIf ($Argument1 -eq "syncandscrub" -and $SomethingDone -ne 1) {
 	Start-Post-Process
 	$subject = $config["SubjectPrefix"]+" "+$message
 	Send-Email $subject "success" $EmailBody
- 	Send-Ping
+ 	Send-Ping -jobstatus "success"
 	$SomethingDone = 1
 }
 ElseIf ($Argument1 -eq "syncandfix" -and $SomethingDone -ne 1) {
 	$argument = "diff"
 	RunSnapraid $argument
 	If ($global:Diffchanges -eq 1){
-		if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){ 
+		if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){
 			Start-Pre-Process
 			Check-Parity-Files
 		}
@@ -1019,7 +1041,7 @@ ElseIf ($Argument1 -eq "syncandfix" -and $SomethingDone -ne 1) {
 		$argument = "sync"
 		RunSnapraid $argument
 	}
-	if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){ 
+	if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){
 		Start-Pre-Process
 		Check-Parity-Files
 	}
@@ -1035,14 +1057,14 @@ ElseIf ($Argument1 -eq "syncandfix" -and $SomethingDone -ne 1) {
 	Start-Post-Process
 	$subject = $config["SubjectPrefix"]+" "+$message
 	Send-Email $subject "success" $EmailBody
- 	Send-Ping
+ 	Send-Ping -jobstatus "success"
 	$SomethingDone = 1
 }
 ElseIf ($Argument1 -eq "syncandfullscrub" -and $SomethingDone -ne 1) {
 	$argument = "diff"
 	RunSnapraid $argument
 	If ($global:Diffchanges -eq 1){
-		if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){ 
+		if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){
 			Start-Pre-Process
 			Check-Parity-Files
 		}
@@ -1055,7 +1077,7 @@ ElseIf ($Argument1 -eq "syncandfullscrub" -and $SomethingDone -ne 1) {
 		$argument = "sync"
 		RunSnapraid $argument
 	}
-	if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){ 
+	if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0){
 		Start-Pre-Process
 		Check-Parity-Files
 	}
@@ -1071,14 +1093,14 @@ ElseIf ($Argument1 -eq "syncandfullscrub" -and $SomethingDone -ne 1) {
 	Start-Post-Process
 	$subject = $config["SubjectPrefix"]+" "+$message
 	Send-Email $subject "success" $EmailBody
- 	Send-Ping
+ 	Send-Ping -jobstatus "success"
 	$SomethingDone = 1
 }
 
 If ($SomethingDone -ne 1){
 	# If another command was passed to the script run this command, else run the sync command
 	If ($Argument1 -ne "sync") {
-		If (($Argument1 -ne "diff" -and $Argument1 -ne "list" -and $Argument1 -ne "dup" -and $Argument1 -ne "status" -and $Argument1 -ne "pool") -and ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0)){ 
+		If (($Argument1 -ne "diff" -and $Argument1 -ne "list" -and $Argument1 -ne "dup" -and $Argument1 -ne "status" -and $Argument1 -ne "pool") -and ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0)){
 			Start-Pre-Process
 			Check-Parity-Files
 		}
@@ -1094,14 +1116,14 @@ If ($SomethingDone -ne 1){
 		Start-Post-Process
 		$subject = $config["SubjectPrefix"]+" "+$message
 		Send-Email $subject "success" $EmailBody
-  		Send-Ping
+  	Send-Ping -jobstatus "success"
 		$SomethingDone = 1
 	}
 	else {
 		$argument = "diff"
 		RunSnapraid $argument
 		If ($global:Diffchanges -eq 1){
-			if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0) { 
+			if ($config["SkipParityFilesAtStart"] -eq 1 -and $global:PreProcessHasRun -eq 0) {
 				Start-Pre-Process
 				Check-Parity-Files
 			}
@@ -1121,7 +1143,7 @@ If ($SomethingDone -ne 1){
 			Start-Post-Process
 			$subject = $config["SubjectPrefix"]+" "+$message
 			Send-Email $subject "success" $EmailBody
-   			Send-Ping
+   		Send-Ping -jobstatus "success"
 			$SomethingDone = 1
 		}
 		else {
@@ -1132,7 +1154,7 @@ If ($SomethingDone -ne 1){
 			Start-Post-Process
 			$subject = $config["SubjectPrefix"]+" SUCCESS: SnapRAID SYNC - No change detected. Nothing to do"
 			Send-Email $subject "success" $EmailBody
-   			Send-Ping
+   		Send-Ping -jobstatus "success"
 			$SomethingDone = 1
 		}
 	}
