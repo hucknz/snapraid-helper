@@ -1,4 +1,4 @@
-  # Determine the directory of the current script
+# Determine the directory of the current script
 $ScriptPath = $MyInvocation.MyCommand.Path
 $ScriptDirectory = Split-Path -Path $ScriptPath
 
@@ -47,6 +47,32 @@ $TranscriptLogfile = Join-Path $config["LogPath"] $config["LogFileName"]
 if (!(Test-Path $config["TmpOutputPath"])) { New-Item -ItemType Directory -Path $config["TmpOutputPath"] }
 if (!(Test-Path $config["LogPath"])) { New-Item -ItemType Directory -Path $config["LogPath"] }
 
+# Fix for TLS errors
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+[System.Net.ServicePointManager]::Expect100Continue = $false
+
+# Inject proper certificate bypass (if needed for your endpoint)
+Add-Type @"
+using System;
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public static class SSLBypass
+{
+    public static void Enable()
+    {
+        ServicePointManager.ServerCertificateValidationCallback =
+            delegate (object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+            {
+                return true;
+            };
+    }
+}
+"@
+
+[SSLBypass]::Enable()
+
 function Send-Ping {
     param (
         [string]$pingURL = $config["pingURL"],
@@ -61,28 +87,35 @@ function Send-Ping {
     try {
         $url = switch ($jobstatus) {
             "success" { $pingURL }
-            "fail" { "$pingURL/fail" }
-            "start" { "$pingURL/start" }
-            default { 
+            "fail"    { "$pingURL/fail" }
+            "start"   { "$pingURL/start" }
+            default {
                 Write-Host "Invalid job status: '$jobstatus'. No ping sent."
                 return
             }
         }
 
-        $headers = @{ "Content-Type" = "application/json" }
+        $headers = @{
+            "Content-Type" = "application/json"
+            "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+
         if ($payload -ne "") {
-            # Send as POST request with payload
-            Invoke-WebRequest -Uri $url -Method POST -Headers $headers -Body $payload -UseBasicParsing -TimeoutSec 10
+            Invoke-WebRequest -Uri $url -Method POST -Headers $headers -Body $payload -UseBasicParsing -TimeoutSec 10 -Proxy $null
             Write-Host "Ping with payload sent to $url"
         } else {
-            # Send without payload (GET request)
-            Invoke-WebRequest -Uri $url -Method GET -UseBasicParsing -TimeoutSec 10
+            Invoke-WebRequest -Uri $url -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 10 -Proxy $null
             Write-Host "Ping sent to $url"
         }
     } catch {
         Write-Host "Failed to send ping for status '$jobstatus': $_"
+        Write-Host "Exception type: $($_.Exception.GetType().FullName)"
+        if ($_.Exception.InnerException) {
+            Write-Host "Inner exception: $($_.Exception.InnerException.Message)"
+        }
     }
 }
+
 
 function Ensure-LogFile {
     $logFiles = @($SnapRAIDLogfile, $TranscriptLogfile)
