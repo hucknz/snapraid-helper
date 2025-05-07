@@ -116,7 +116,6 @@ function Send-Ping {
     }
 }
 
-
 function Ensure-LogFile {
     $logFiles = @($SnapRAIDLogfile, $TranscriptLogfile)
     foreach ($logFile in $logFiles) {
@@ -191,26 +190,35 @@ function Run-SnapRAID {
         }
 
         # Execute the SnapRAID command and capture the output
-		$output = & "$snapraidCmd" -c "$snapraidConfigPath" $command -l "$SnapRAIDLogfile" 2>&1
+        $output = & "$snapraidCmd" -c "$snapraidConfigPath" $command -l "$SnapRAIDLogfile" 2>&1
 
-		# Process output for specific warnings/errors
-		$outputLines = $output -split "`n"
-		foreach ($line in $outputLines) {
-		    if ($line -match "WARNING.*parity.*level") {
-		        Write-Host "Detected parity level warning: $line"
-		        # Log the warning gracefully
-		        if ($SnapRAIDLogfile) {
-		            "SnapRAID Warning: $line" | Out-File -FilePath $SnapRAIDLogfile -Append
-		        }
-		    } elseif ($line -match "ERROR.*file.*path") {
-		        Write-Host "Detected file path error: $line"
-		        # Log the error gracefully
-		        if ($SnapRAIDLogfile) {
-		            "SnapRAID Error: $line" | Out-File -FilePath $SnapRAIDLogfile -Append
-		        }
-		    }
-		}
+        # Display the output in the terminal (filtered to remove Windows log messages)
+        $filteredOutput = $output | Where-Object {
+            -not ($_ -match "NT AUTHORITY|BUILTIN|S-\d-\d+-(\d+-){1,14}\d+")
+        }
+        
+        # Print SnapRAID output directly to terminal
+        $filteredOutput | ForEach-Object {
+            Write-Host "SnapRAID: $_"
+        }
 
+        # Process output for specific warnings/errors
+        $outputLines = $output -split "`n"
+        foreach ($line in $outputLines) {
+            if ($line -match "WARNING.*parity.*level") {
+                Write-Host "Detected parity level warning: $line"
+                # Log the warning gracefully
+                if ($SnapRAIDLogfile) {
+                    "SnapRAID Warning: $line" | Out-File -FilePath $SnapRAIDLogfile -Append
+                }
+            } elseif ($line -match "ERROR.*file.*path") {
+                Write-Host "Detected file path error: $line"
+                # Log the error gracefully
+                if ($SnapRAIDLogfile) {
+                    "SnapRAID Error: $line" | Out-File -FilePath $SnapRAIDLogfile -Append
+                }
+            }
+        }
 
         # Handle warnings gracefully
         if ($output -match "WARNING!") {
@@ -218,6 +226,9 @@ function Run-SnapRAID {
                 Write-Output "SnapRAID Warning: $output" | Out-File -FilePath $SnapRAIDLogfile -Append
             }
         }
+
+        # Also ensure we save the full output to temp file for further processing
+        $filteredOutput | Out-File -FilePath $TmpOutput -Force
 
         # Check exit code
         if ($LASTEXITCODE -ne 0) {
@@ -241,7 +252,7 @@ function Run-SnapRAID {
             Write-Host "ERROR: SnapRAID log file path is not set."
         }
         Send-Ping -jobstatus "fail" -payload $outcomeMessage
-        Stop-Transcript
+        Stop-TranscriptWithoutWindowsMessages
         exit 1
     }
 }
@@ -251,8 +262,14 @@ function Manage-Services {
     if ($config["ServiceEnable"] -eq 1) {
         $ServiceList = $config["ServiceName"].Split(",").Trim('"')
         foreach ($service in $ServiceList) {
-            if ($action -eq "stop") { Stop-Service $service }
-            if ($action -eq "start") { Start-Service $service }
+            if ($action -eq "stop") { 
+                Write-Host "Stopping service: $service"
+                Stop-Service $service 
+            }
+            if ($action -eq "start") { 
+                Write-Host "Starting service: $service"
+                Start-Service $service 
+            }
         }
     }
 }
@@ -264,7 +281,7 @@ function Start-Pre-Process {
         if ($LASTEXITCODE -ne 0) {
             Write-Host "ERROR: Pre-Process failed with exit code $LASTEXITCODE"
             Send-Ping -jobstatus "fail" -payload $outcomeMessage
-            Stop-Transcript
+            Stop-TranscriptWithoutWindowsMessages
             exit 1
         }
     }
@@ -277,7 +294,7 @@ function Start-Post-Process {
         if ($LASTEXITCODE -ne 0) {
             Write-Host "ERROR: Post-Process failed with exit code $LASTEXITCODE"
             Send-Ping -jobstatus "fail" -payload $outcomeMessage
-            Stop-Transcript
+            Stop-TranscriptWithoutWindowsMessages
             exit 1
         }
     }
@@ -298,7 +315,7 @@ function Check-EventLogs {
             if ($eventLogs.Count -gt 0 -and $config["EventLogHaltOnDiskError"] -eq 1) {
                 Write-Host "WARN: Disk Errors found in event logs, halting SnapRAID operation."
                 Send-Ping -jobstatus "fail" -payload $outcomeMessage
-                Stop-Transcript
+                Stop-TranscriptWithoutWindowsMessages
                 exit 1
             }
         } catch [System.Management.Automation.CommandNotFoundException] {
@@ -315,7 +332,7 @@ function Check-Content-Files {
             $message = "ERROR: Content file ($element) not found!"
             Write-Host $message -ForegroundColor red -backgroundcolor yellow
             Send-Ping -jobstatus "fail" -payload $outcomeMessage
-            Stop-Transcript
+            Stop-TranscriptWithoutWindowsMessages
             exit 1
         }
     }
@@ -372,6 +389,47 @@ function Maybe-Run-Scrub {
     }
 }
 
+# Custom function to stop transcript without capturing Windows messages
+function Stop-TranscriptWithoutWindowsMessages {
+    try {
+        # Stop the transcript
+        Stop-Transcript
+        
+        # Clean up the transcript file if it exists
+        if (Test-Path $TranscriptLogfile) {
+            $content = Get-Content $TranscriptLogfile -Raw
+            
+            # Filter out Windows log messages
+            $filteredContent = $content -replace "(?m)^.*NT AUTHORITY.*\r?\n?", ""
+            $filteredContent = $filteredContent -replace "(?m)^.*BUILTIN.*\r?\n?", ""
+            $filteredContent = $filteredContent -replace "(?m)^.*S-\d-\d+-(\d+-){1,14}\d+.*\r?\n?", ""
+            
+            # Write the filtered content back to the file
+            Set-Content -Path $TranscriptLogfile -Value $filteredContent -Force
+        }
+    }
+    catch {
+        Write-Host "Error while stopping transcript: $_"
+    }
+}
+
+# Function to load and display snapraid_operations.log content
+function Display-SnapRAIDLog {
+    if (Test-Path $SnapRAIDLogfile) {
+        Write-Host "`n-------------------- SnapRAID Log Content --------------------"
+        Get-Content $SnapRAIDLogfile | ForEach-Object {
+            # Filter out Windows log messages
+            if (-not ($_ -match "NT AUTHORITY|BUILTIN|S-\d-\d+-(\d+-){1,14}\d+")) {
+                Write-Host $_
+            }
+        }
+        Write-Host "-------------------- End SnapRAID Log --------------------`n"
+    }
+    else {
+        Write-Host "SnapRAID log file not found at: $SnapRAIDLogfile"
+    }
+}
+
 # Main script execution
 Ensure-LogFile
 Manage-LogFile
@@ -379,6 +437,7 @@ Manage-LogFile
 # Send a start ping
 Send-Ping -jobstatus "start"
 
+# Use standard transcript but we'll clean it up at the end
 Start-Transcript -path $TranscriptLogfile -append
 
 Write-Host "Starting Pre-Process..."
@@ -441,9 +500,12 @@ Write-Host "Starting Post-Process..."
 Start-Post-Process
 Write-Host "Post-Process completed."
 
+# Display SnapRAID log content at the end
+Display-SnapRAIDLog
+
 # Send a single success ping at the end
 Send-Ping -jobstatus "success"
 
-# End Transcript
-Stop-Transcript
-Write-Host "Script execution completed."  
+# End Transcript with cleanup
+Stop-TranscriptWithoutWindowsMessages
+Write-Host "Script execution completed."
